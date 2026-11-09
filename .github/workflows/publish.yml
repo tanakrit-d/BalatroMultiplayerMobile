@@ -1,0 +1,45 @@
+name: Publish patched mod release
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: publish-mobile-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'tanakrit-d/BalatroMultiplayerMobile' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.7'
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Check Python quality
+        run: |
+          uv run --locked ruff check
+          uv run --locked ruff format --check
+          uv run --locked ty check
+      - run: sudo apt-get update && sudo apt-get install -y lua5.1 luajit
+      - run: uv run --locked python -m unittest discover -s tests -v
+      - name: Build and stage verified assets
+        id: release
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          uv run --locked python scripts/mobile.py build | tee work/release-build.log
+          bundle=$(tail -n 1 work/release-build.log)
+          directory=$(uv run --locked python scripts/release.py stage "$bundle")
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: ${{ steps.release.outputs.directory }}
+          if-no-files-found: error
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_DIRECTORY: ${{ steps.release.outputs.directory }}
+        run: uv run --locked python scripts/release.py publish "$RELEASE_DIRECTORY"

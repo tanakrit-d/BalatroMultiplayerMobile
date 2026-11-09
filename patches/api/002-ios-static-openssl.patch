@@ -1,0 +1,32 @@
+diff --git a/networking/openssl_ffi.lua b/networking/openssl_ffi.lua
+index 435f80f77b0a7cf8273e08072b3b2dbbba3ab2fc..af11f7004e52f48acd954ad8000550b4b7589142 100644
+--- a/networking/openssl_ffi.lua
++++ b/networking/openssl_ffi.lua
+@@ -201,6 +201,27 @@
+ 
+ local function load_openssl()
+ 	if openssl_loaded then
++		return true
++	end
++
++	-- The iOS runtime links OpenSSL statically and exports it for every Lua
++	-- state, including networking workers. Never dlopen the desktop dylibs.
++	if os.getenv('BMP_IOS_OPENSSL') == '1' then
++		local ok, err = pcall(function()
++			ssl_lib, crypto_lib = ffi.C, ffi.C
++			if ssl_lib.OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS + OPENSSL_INIT_LOAD_CRYPTO_STRINGS, nil) ~= 1 then
++				error('iOS OpenSSL initialization failed')
++			end
++			-- Resolve the key entry points before advertising TLS availability.
++			assert(ssl_lib.TLS_client_method() ~= nil)
++			assert(crypto_lib.EVP_sha256() ~= nil)
++		end)
++		if not ok then
++			ssl_error('iOS static OpenSSL: ' .. tostring(err))
++			return false, err
++		end
++		openssl_loaded = true
++		ssl_log('Using OpenSSL linked into the iOS runtime')
+ 		return true
+ 	end
+ 

@@ -1,0 +1,29 @@
+diff --git a/tests/unit/matching_skip_timer_test.lua b/tests/unit/matching_skip_timer_test.lua
+index 707622648218410474a212e722501670a1345450..0594aa80749967560c990029ac938c511f37861e 100644
+--- a/tests/unit/matching_skip_timer_test.lua
++++ b/tests/unit/matching_skip_timer_test.lua
+@@ -39,7 +39,7 @@ local function setup(cfg)
+ 			PVP.GAME.timer = math.max(0, PVP.GAME.timer - a)
+ 		end
+ 	end
+-	load(chunk)()
++	assert((loadstring or load)(chunk))()
+ end
+ local function own()
+ 	PVP.GAME.skips_before_pvp = (PVP.GAME.skips_before_pvp or 0) + 1
+diff --git a/tests/unit/nemesis_deck_test.lua b/tests/unit/nemesis_deck_test.lua
+index 1ac2227c9c3ab74ec7c4fe83c0a7859e76d52904..c84879309259b0111d517b813f128c541f243bda 100644
+--- a/tests/unit/nemesis_deck_test.lua
++++ b/tests/unit/nemesis_deck_test.lua
+@@ -1,5 +1,11 @@
+ -- Plain Lua test for G.FUNCS.load_nemesis_deck (networking/action_handlers.lua).
+ -- Run from the repo root: luajit tests/unit/nemesis_deck_test.lua
++-- The extracted game function uses goto, supported by LÖVE's LuaJIT but not Lua 5.1.
++if not (loadstring or load)("::label::") then
++	print("SKIP nemesis_deck_test: requires goto support; run with LuaJIT")
++	return
++end
++
+ G = {
+ 	FUNCS = {},
+ 	CARD_W = 1,

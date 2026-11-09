@@ -1,0 +1,94 @@
+name: Check official releases
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: official-release-update
+  cancel-in-progress: false
+jobs:
+  update:
+    if: github.repository == 'tanakrit-d/BalatroMultiplayerMobile'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.13.7'
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Check Python quality
+        run: |
+          uv run --locked ruff check
+          uv run --locked ruff format --check
+          uv run --locked ty check
+      - name: Resolve official release pair
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --locked python scripts/mobile.py update
+          if ! git diff --quiet -- sources.lock.json; then
+            uv run --locked python -c 'import json; from pathlib import Path; p = Path("release.json"); data = json.loads(p.read_text()); data["mobile_revision"] = 1; p.write_text(json.dumps(data, indent=2) + "\n")'
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install test runtimes
+        if: steps.update.outputs.changed == 'true'
+        run: sudo apt-get update && sudo apt-get install -y lua5.1 luajit
+      - name: Validate candidate pair
+        id: validation
+        if: steps.update.outputs.changed == 'true'
+        continue-on-error: true
+        run: |
+          uv run --locked python -m unittest discover -s tests -v
+          uv run --locked python scripts/mobile.py build
+      - name: Open upgrade review
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: tanakrit-d/BalatroMultiplayerMobile
+          VALIDATION: ${{ steps.validation.outcome }}
+        run: |
+          set -euo pipefail
+          # One immutable proposal branch per source pair. Never force-push edits.
+          pair=$(sha256sum sources.lock.json | cut -c1-16)
+          branch="updates/releases-$pair"
+          if ! git ls-remote --exit-code --heads origin "$branch"; then
+            git switch -c "$branch"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add sources.lock.json release.json
+            git commit -m 'Update official release source pins'
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+          existing=$(gh pr list --head "$branch" --base main --state all --json number --jq 'length')
+          if [ "$existing" = 0 ]; then
+            uv run --locked python - <<'PY'
+          import os
+          from pathlib import Path
+          Path('work').mkdir(exist_ok=True)
+          Path('work/upgrade-pr.md').write_text(
+              'Update the paired official API/PvP source pins.\n\n'
+              'Candidate validation: ' + os.environ['VALIDATION'] + '.\n\n'
+              'Review the Actions log for patch conflicts and test results. Fix patches in this PR if necessary. '
+              'Source validation does not establish device compatibility or publish an IPA.\n'
+          )
+          PY
+            gh pr create --base main --head "$branch" --title 'Update official API/PvP release pair' --body-file work/upgrade-pr.md
+          fi
+      - uses: actions/upload-artifact@v7
+        if: steps.validation.outcome == 'success'
+        with:
+          name: candidate-mobile-sources
+          path: dist/
+          if-no-files-found: error
+      - name: Report validation failure
+        if: steps.validation.outcome == 'failure'
+        run: |
+          echo 'The upgrade PR needs patch or compatibility fixes. No release was published.'
+          exit 1

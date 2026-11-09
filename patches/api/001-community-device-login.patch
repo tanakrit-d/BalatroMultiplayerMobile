@@ -1,0 +1,260 @@
+diff --git a/config.lua b/config.lua
+index 13ea215c1e315deea8ccb8474eeb0387fdd87426..97929ec80d3e84d0c14783bf79e1f04669ac61bb 100644
+--- a/config.lua
++++ b/config.lua
+@@ -1,6 +1,8 @@
+ return {
+ 	['chat_enabled'] = false,
+ 	['chat_key'] = 't',
++	-- Optional name for Steam-free Community login (default: Mobile-<id suffix>).
++	-- ['mobile_display_name'] = 'Your name',
+ 	-- To play on a Community server, set use_custom_server = true and its
+ 	-- server_host, server_port, server_secure, nakama_server_key, web_url
+ 	-- (defaults: api/connection/lifecycle.lua's SERVER_DEFAULTS). Without
+diff --git a/core.lua b/core.lua
+index bd6785bdf86c455fdcc836e4b8372df8f1f6936d..986012907b311323de993e01f98b92e60a4a74ff 100644
+--- a/core.lua
++++ b/core.lua
+@@ -123,6 +123,7 @@ else
+ 	MPAPI.sendWarnMessage('Steam module failed to load')
+ end
+ 
++MPAPI.load_mpapi_file('networking/device_identity.lua')
+ MPAPI.load_mpapi_file('networking/connection.lua')
+ MPAPI.load_mpapi_file('networking/nakama_lobby.lua')
+ MPAPI.load_mpapi_file('networking/nakama_notify.lua')
+@@ -182,7 +183,7 @@ G.E_MANAGER:add_event(Event({
+ 	blockable = false,
+ 	blocking = false,
+ 	func = function()
+-		if not G.STEAM then
++		if not G.STEAM and (MPAPI._internal.conn.is_official_server() or MPAPI._internal.conn.force_steam_login) then
+ 			return false
+ 		end
+ 		MPAPI._internal.set_ready(true)
+diff --git a/networking/connection.lua b/networking/connection.lua
+index 7572ed82d38e3d7cd6c337ec6ab6346ec25b696c..670507ba8ed0d981e87da5fbc723ed92c8424812 100644
+--- a/networking/connection.lua
++++ b/networking/connection.lua
+@@ -408,17 +408,26 @@ function connection:_on_device_session(session)
+ 	self:_nakama_session_init(session)
+ end
+ 
+--- A server that is not Official takes a Device login keyed by the raw
+--- SteamID64, with no username: the server gives the same Steam id the same
+--- account and takes the Steam name from session_init. Nothing proves either,
+--- so any player there can log in as anyone.
++-- Community servers keep the desktop Steam identity when available. Without
++-- Steam, use a saved installation credential rather than a shared guest id.
+ function connection:_try_device_auth()
+-	local steam_id, err = self.steam.get_steam_id()
+-	if not steam_id then
+-		fail(self, MPAPI.OfflineReason.STEAM_NOT_RUNNING, 'Steam id unavailable: ' .. tostring(err))
+-		return
++	local device_id, err
++	if self.steam and self.steam.available() then
++		device_id, err = self.steam.get_steam_id()
++		if not device_id then
++			fail(self, MPAPI.OfflineReason.STEAM_NOT_RUNNING, 'Steam id unavailable: ' .. tostring(err))
++			return
++		end
++	else
++		device_id, err = MPAPI.networking.device_identity.get()
++		if not device_id then
++			fail(self, MPAPI.OfflineReason.OTHER, 'Device identity unavailable: ' .. tostring(err))
++			return
++		end
++		local name = MPAPI.config and MPAPI.config.mobile_display_name
++		self.steam_name = type(name) == 'string' and name:match('%S') and name or ('Mobile-' .. device_id:sub(-8))
+ 	end
+-	self.nakama_client.authenticate_device(steam_id, nil, true, nil, function(session)
++	self.nakama_client.authenticate_device(device_id, nil, true, nil, function(session)
+ 		self:_on_device_session(session)
+ 	end)
+ end
+@@ -489,12 +498,13 @@ function connection:connect()
+ 		return
+ 	end
+ 
+-	if not self.steam or not self.steam.available() then
++	local steam_available = self.steam and self.steam.available()
++	if self.official and not steam_available then
+ 		fail(self, MPAPI.OfflineReason.STEAM_NOT_RUNNING, 'Steam is not available')
+ 		return
+ 	end
+ 
+-	self.steam_name = self.steam.get_persona_name() or 'Player'
++	self.steam_name = steam_available and self.steam.get_persona_name() or 'Player'
+ 
+ 	self:_do_auth()
+ end
+diff --git a/networking/device_identity.lua b/networking/device_identity.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..deed2b3853bff59d8a562be206b72f6d85e334ae
+--- /dev/null
++++ b/networking/device_identity.lua
+@@ -0,0 +1,35 @@
++-- A Community login credential, stored outside the mod so updates preserve it.
++-- Never use the gameplay RNG: it may be seeded identically on every device.
++local identity = {}
++local directory = 'mpapi'
++local filename = directory .. '/mobile-device-id.txt'
++
++function identity.get()
++	local fs = love.filesystem
++	if fs.getInfo(filename) then
++		local value, err = fs.read(filename)
++		if not value then return nil, err or 'Could not read the saved device identity' end
++		if #value ~= 71 or not value:match('^mobile%-%x+$') then
++			return nil, 'Invalid saved device identity; restore it from backup'
++		end
++		return value
++	end
++
++	-- iOS and Android expose OS randomness through /dev/urandom. Fail rather
++	-- than creating a predictable credential if that source is unavailable.
++	local source = io.open('/dev/urandom', 'rb')
++	if not source then return nil, 'OS random source is unavailable' end
++	local bytes = source:read(32)
++	source:close()
++	if not bytes or #bytes ~= 32 then return nil, 'Could not read OS randomness' end
++	local value = 'mobile-' .. bytes:gsub('.', function(byte) return ('%02x'):format(byte:byte()) end)
++	local ok, err = fs.createDirectory(directory)
++	if not ok then return nil, err or 'Could not create the identity directory' end
++	ok, err = fs.write(filename, value)
++	if not ok then return nil, err or 'Could not save the device identity' end
++	-- Only authenticate with a credential that was successfully persisted.
++	return value
++end
++
++MPAPI.networking.device_identity = identity
++return identity
+diff --git a/tests/mobile_login_test.lua b/tests/mobile_login_test.lua
+new file mode 100644
+index 0000000000000000000000000000000000000000..ec7c7e534b1bc67592fa863440376074d1195adb
+--- /dev/null
++++ b/tests/mobile_login_test.lua
+@@ -0,0 +1,123 @@
++-- Run from the API checkout: lua tests/mobile_login_test.lua
++local checks = 0
++local function check(value, message)
++	checks = checks + 1
++	assert(value, message)
++end
++
++MPAPI = { networking = {}, config = {}, sendDebugMessage = function() end }
++dofile('domain/connection_state.lua')
++dofile('domain/offline_reason.lua')
++local identity = dofile('networking/device_identity.lua')
++local filename = 'mpapi/mobile-device-id.txt'
++local files, fail_write, fail_read, fail_directory = {}, false, false, false
++local entropy_available, short_entropy = true, false
++love = { filesystem = {
++	getInfo = function(name) return files[name] and { type = 'file' } end,
++	read = function(name) if fail_read then return nil, 'read failed' end return files[name] end,
++	createDirectory = function() return not fail_directory end,
++	write = function(name, value)
++		if fail_write then return false, 'write failed' end
++		files[name] = value
++		return true
++	end,
++} }
++local real_open = io.open
++io.open = function(name, mode)
++	check(name == '/dev/urandom' and mode == 'rb', 'identity uses the OS random source')
++	if not entropy_available then return nil end
++	return { read = function() return short_entropy and 'short' or string.rep('\0\n', 16) end, close = function() end }
++end
++local id = assert(identity.get())
++check(#id == 71 and id:match('^mobile%-%x+$'), 'credential encodes all 32 random bytes, including newline and NUL')
++check(files[filename] == id, 'credential is saved before login')
++entropy_available = false
++check(identity.get() == id, 'saved credential survives module reload without fresh entropy')
++identity = dofile('networking/device_identity.lua')
++check(identity.get() == id, 'saved credential survives a new module instance')
++files[filename] = 'damaged'
++check(identity.get() == nil and files[filename] == 'damaged', 'corrupt identity is never silently replaced')
++files[filename] = id
++fail_read = true
++check(identity.get() == nil, 'unreadable identity blocks login')
++fail_read = false
++files = {}
++check(identity.get() == nil, 'missing entropy blocks credential creation')
++entropy_available, short_entropy = true, true
++check(identity.get() == nil, 'short entropy blocks credential creation')
++short_entropy, fail_directory = false, true
++check(identity.get() == nil, 'directory creation failure blocks login')
++fail_directory, fail_write = false, true
++check(identity.get() == nil, 'write failure blocks login')
++fail_write = false
++io.open = real_open
++local actual_id = assert(identity.get())
++files = {}
++check(identity.get() ~= actual_id, 'real OS entropy gives different installations different credentials')
++files[filename] = id
++
++dofile('networking/connection.lua')
++local Connection = MPAPI.networking.connection
++local unavailable = { available = function() return false end }
++local available = {
++	available = function() return true end,
++	get_steam_id = function() return '76561198000000000' end,
++	get_persona_name = function() return 'Desktop player' end,
++	get_auth_ticket = function() return { ticket = 'proof', handle = 1 } end,
++}
++local function connect(official, steam, impersonate)
++	local calls = {}
++	local client = {
++		authenticate_device = function(device, vars, create, username)
++			calls.device, calls.username, calls.create = device, username, create
++		end,
++		authenticate_custom = function(device, vars)
++			calls.custom, calls.ticket = device, vars.steam_ticket
++		end,
++	}
++	local conn = Connection.new({ official = official, steam = steam, nakama_client = client, impersonate = impersonate })
++	conn.on_state_change = function(_, context) calls.reason = context.offline_reason end
++	conn:connect()
++	return conn, calls
++end
++local conn, calls = connect(false, unavailable)
++check(calls.device == id and calls.create and calls.username == nil, 'Steam-free Community login uses persisted id with server-assigned username')
++check(conn.steam_name == 'Mobile-' .. id:sub(-8), 'mobile login has a stable default display name')
++MPAPI.config.mobile_display_name = 'Mobile Alice'
++conn, calls = connect(false, nil)
++check(calls.device == id and conn.steam_name == 'Mobile Alice', 'missing Steam module and configured display name work')
++conn, calls = connect(true, unavailable)
++check(calls.reason == MPAPI.OfflineReason.STEAM_NOT_RUNNING and not calls.device, 'Official login still requires Steam')
++conn, calls = connect(false, available)
++check(calls.device == '76561198000000000' and conn.steam_name == 'Desktop player', 'desktop Community identity is preserved')
++conn, calls = connect(true, available)
++check(calls.custom == 'steam-ticket' and calls.ticket == 'proof' and not calls.device, 'Official login still uses Steam tickets')
++conn, calls = connect(false, unavailable, { steamName = 'TestPlayer1' })
++check(calls.device == 'bmp-dev-TestPlayer1', 'Dev impersonation keeps its existing identity')
++files[filename] = 'damaged'
++conn, calls = connect(false, unavailable)
++check(not calls.device and calls.reason == MPAPI.OfflineReason.OTHER, 'invalid saved credential cannot trigger account creation')
++
++-- Exercise the actual core startup event without loading the rest of the game.
++local events, started, ready, callbacks = {}, 0, false, 0
++SMODS = { current_mod = { path = '.', id = 'MultiplayerAPI' }, load_file = function()
++	return function() return { stage_if_needed = function() end } end
++end }
++NFS = { getDirectoryItemsInfo = function() return {} end }
++sendDebugMessage, sendWarnMessage = function() end, function() end
++Event = function(event) return event end
++G = { E_MANAGER = { add_event = function(_, event) events[#events + 1] = event end } }
++dofile('core.lua')
++local official = true
++MPAPI._internal.conn = { is_official_server = function() return official end }
++MPAPI._internal.set_ready = function(value) ready = value end
++MPAPI._internal.run_ready_callbacks = function() callbacks = callbacks + 1 end
++MPAPI.connect = function() started = started + 1 end
++local startup = events[#events].func
++check(startup() == false and started == 0, 'Official startup still waits for Steam')
++official = false
++MPAPI._internal.conn.force_steam_login = true
++check(startup() == false and started == 0, 'forced Steam login still waits for Steam')
++MPAPI._internal.conn.force_steam_login = false
++check(startup() == true and ready and started == 1 and callbacks == 1, 'Community startup connects and registers gamemodes without Steam')
++print(('ok   %d mobile login checks'):format(checks))

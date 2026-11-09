@@ -1,0 +1,3 @@
+# Patch context deliberately contains leading spaces, tabs and blank lines.
+# Preserve exact patch bytes and do not lint diff syntax as source whitespace.
+*.patch -text -whitespace
