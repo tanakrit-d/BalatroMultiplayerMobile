@@ -107,6 +107,40 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "clean"):
                 release.stage(bundle)
 
+    def test_draft_lookup_falls_back_to_paginated_listing(self):
+        draft = {"id": 42, "tag_name": "v1.0.5", "draft": True, "assets": []}
+        with (
+            patch.object(release, "lookup", return_value=None),
+            patch.object(
+                release,
+                "gh",
+                return_value=json.dumps([[{"tag_name": "v1.0.4"}], [draft]]).encode(),
+            ) as command,
+        ):
+            self.assertEqual(release.lookup_release("v1.0.5"), draft)
+            self.assertIn("--paginate", command.call_args.args)
+            self.assertIn("--slurp", command.call_args.args)
+
+    def test_duplicate_drafts_fail_explicitly(self):
+        draft = {"tag_name": "v1.0.5", "draft": True}
+        with (
+            patch.object(release, "lookup", return_value=None),
+            patch.object(
+                release, "gh", return_value=json.dumps([[draft, draft]]).encode()
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "Multiple releases"):
+                release.lookup_release("v1.0.5")
+
+    def test_published_lookup_needs_no_fallback(self):
+        published = {"tag_name": "v1.0.5", "draft": False}
+        with (
+            patch.object(release, "lookup", return_value=published),
+            patch.object(release, "gh") as command,
+        ):
+            self.assertEqual(release.lookup_release("v1.0.5"), published)
+            command.assert_not_called()
+
     def test_existing_tag_must_match_commit(self):
         with patch.object(
             release,

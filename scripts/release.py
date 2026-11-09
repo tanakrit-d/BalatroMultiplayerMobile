@@ -127,6 +127,21 @@ def lookup(path):
         raise
 
 
+def lookup_release(tag):
+    release = lookup(f"repos/{REPOSITORY}/releases/tags/{tag}")
+    if release is not None:
+        return release
+    # GitHub's by-tag endpoint does not return unpublished drafts. The
+    # authenticated releases listing includes them; inspect every page.
+    pages = json.loads(
+        gh("api", "--paginate", "--slurp", f"repos/{REPOSITORY}/releases?per_page=100")
+    )
+    matches = [item for page in pages for item in page if item["tag_name"] == tag]
+    if len(matches) > 1:
+        raise ValueError("Multiple releases have this tag; resolve duplicate drafts")
+    return matches[0] if matches else None
+
+
 def check_tag(tag, commit):
     ref = lookup(f"repos/{REPOSITORY}/git/ref/tags/{tag}")
     if ref is None:
@@ -174,7 +189,7 @@ def publish(directory):
         if mobile.digest((directory / name).read_bytes()) != checksum:
             raise ValueError("Staged checksum mismatch")
     check_tag(tag, commit)
-    remote = lookup(f"repos/{REPOSITORY}/releases/tags/{tag}")
+    remote = lookup_release(tag)
     if remote is None:
         with tempfile.TemporaryDirectory() as temp:
             notes = Path(temp) / "notes.md"
@@ -195,7 +210,11 @@ def publish(directory):
                 "--notes-file",
                 str(notes),
             )
-        remote = lookup(f"repos/{REPOSITORY}/releases/tags/{tag}")
+        remote = lookup_release(tag)
+    if remote is None:
+        raise ValueError(
+            "Created draft could not be found; inspect GitHub before retrying"
+        )
     remote_names = {asset["name"] for asset in remote["assets"]}
     if remote_names - expected:
         raise ValueError("Existing release has unexpected assets")
@@ -242,7 +261,16 @@ def publish(directory):
             else:
                 raise ValueError("Published release is incomplete; refusing mutation")
     if remote["draft"]:
-        gh("release", "edit", tag, "--repo", REPOSITORY, "--draft=false")
+        gh(
+            "release",
+            "edit",
+            tag,
+            "--repo",
+            REPOSITORY,
+            "--target",
+            commit,
+            "--draft=false",
+        )
     check_tag(tag, commit)
     print(f"https://github.com/{REPOSITORY}/releases/tag/{tag}")
 
