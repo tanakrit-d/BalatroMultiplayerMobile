@@ -1,2 +1,3 @@
 001-community-device-login.patch
 002-ios-static-openssl.patch
+003-lua-test-compatibility.patch

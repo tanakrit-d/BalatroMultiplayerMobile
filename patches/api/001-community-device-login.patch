@@ -12,7 +12,7 @@ index 13ea215c1e315deea8ccb8474eeb0387fdd87426..97929ec80d3e84d0c14783bf79e1f046
  	-- server_host, server_port, server_secure, nakama_server_key, web_url
  	-- (defaults: api/connection/lifecycle.lua's SERVER_DEFAULTS). Without
 diff --git a/core.lua b/core.lua
-index bd6785bdf86c455fdcc836e4b8372df8f1f6936d..986012907b311323de993e01f98b92e60a4a74ff 100644
+index 4ef88f19081c6eb3ef67f3799432339c698092ae..b866e0425dc800bfefdb262d10ad78d74f98f406 100644
 --- a/core.lua
 +++ b/core.lua
 @@ -123,6 +123,7 @@ else
@@ -23,20 +23,21 @@ index bd6785bdf86c455fdcc836e4b8372df8f1f6936d..986012907b311323de993e01f98b92e6
  MPAPI.load_mpapi_file('networking/connection.lua')
  MPAPI.load_mpapi_file('networking/nakama_lobby.lua')
  MPAPI.load_mpapi_file('networking/nakama_notify.lua')
-@@ -182,7 +183,7 @@ G.E_MANAGER:add_event(Event({
- 	blockable = false,
- 	blocking = false,
- 	func = function()
--		if not G.STEAM then
-+		if not G.STEAM and (MPAPI._internal.conn.is_official_server() or MPAPI._internal.conn.force_steam_login) then
+@@ -185,7 +186,8 @@ G.E_MANAGER:add_event(Event({
+ 		-- Waits for luasteam, unless a Steam provider stands in for it. A
+ 		-- provider still settling defers the first connect to provider_changed().
+ 		local steam = MPAPI.networking.steam
+-		if not G.STEAM and not (steam and steam.provider()) then
++		if not G.STEAM and not (steam and steam.provider())
++			and (MPAPI._internal.conn.is_official_server() or MPAPI._internal.conn.force_steam_login) then
  			return false
  		end
  		MPAPI._internal.set_ready(true)
 diff --git a/networking/connection.lua b/networking/connection.lua
-index 7572ed82d38e3d7cd6c337ec6ab6346ec25b696c..670507ba8ed0d981e87da5fbc723ed92c8424812 100644
+index 36dc805de7b9ce4ca7d9da17914b68911464ad72..a4648bcf0d381a84409e5668e16023991f33c341 100644
 --- a/networking/connection.lua
 +++ b/networking/connection.lua
-@@ -408,17 +408,26 @@ function connection:_on_device_session(session)
+@@ -424,17 +424,26 @@ function connection:_on_device_session(session)
  	self:_nakama_session_init(session)
  end
  
@@ -49,13 +50,13 @@ index 7572ed82d38e3d7cd6c337ec6ab6346ec25b696c..670507ba8ed0d981e87da5fbc723ed92
  function connection:_try_device_auth()
 -	local steam_id, err = self.steam.get_steam_id()
 -	if not steam_id then
--		fail(self, MPAPI.OfflineReason.STEAM_NOT_RUNNING, 'Steam id unavailable: ' .. tostring(err))
+-		self:_fail_steam_unavailable('Steam id unavailable: ' .. tostring(err))
 -		return
 +	local device_id, err
 +	if self.steam and self.steam.available() then
 +		device_id, err = self.steam.get_steam_id()
 +		if not device_id then
-+			fail(self, MPAPI.OfflineReason.STEAM_NOT_RUNNING, 'Steam id unavailable: ' .. tostring(err))
++			self:_fail_steam_unavailable('Steam id unavailable: ' .. tostring(err))
 +			return
 +		end
 +	else
@@ -72,14 +73,15 @@ index 7572ed82d38e3d7cd6c337ec6ab6346ec25b696c..670507ba8ed0d981e87da5fbc723ed92
  		self:_on_device_session(session)
  	end)
  end
-@@ -489,12 +498,13 @@ function connection:connect()
+@@ -505,12 +514,14 @@ function connection:connect()
  		return
  	end
  
 -	if not self.steam or not self.steam.available() then
 +	local steam_available = self.steam and self.steam.available()
-+	if self.official and not steam_available then
- 		fail(self, MPAPI.OfflineReason.STEAM_NOT_RUNNING, 'Steam is not available')
++	local steam_provider = self.steam and self.steam.provider and self.steam.provider()
++	if (self.official or steam_provider) and not steam_available then
+ 		self:_fail_steam_unavailable('Steam is not available')
  		return
  	end
  
@@ -131,10 +133,10 @@ index 0000000000000000000000000000000000000000..deed2b3853bff59d8a562be206b72f6d
 +return identity
 diff --git a/tests/mobile_login_test.lua b/tests/mobile_login_test.lua
 new file mode 100644
-index 0000000000000000000000000000000000000000..ec7c7e534b1bc67592fa863440376074d1195adb
+index 0000000000000000000000000000000000000000..4d37e161346482541c9a5c33981385d9a7413a46
 --- /dev/null
 +++ b/tests/mobile_login_test.lua
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,136 @@
 +-- Run from the API checkout: lua tests/mobile_login_test.lua
 +local checks = 0
 +local function check(value, message)
@@ -195,7 +197,10 @@ index 0000000000000000000000000000000000000000..ec7c7e534b1bc67592fa863440376074
 +
 +dofile('networking/connection.lua')
 +local Connection = MPAPI.networking.connection
-+local unavailable = { available = function() return false end }
++local unavailable = {
++	available = function() return false end,
++	unavailable_reason = function() return MPAPI.OfflineReason.STEAM_NOT_RUNNING end,
++}
 +local available = {
 +	available = function() return true end,
 +	get_steam_id = function() return '76561198000000000' end,
@@ -257,4 +262,14 @@ index 0000000000000000000000000000000000000000..ec7c7e534b1bc67592fa863440376074
 +check(startup() == false and started == 0, 'forced Steam login still waits for Steam')
 +MPAPI._internal.conn.force_steam_login = false
 +check(startup() == true and ready and started == 1 and callbacks == 1, 'Community startup connects and registers gamemodes without Steam')
++-- Preserve the upstream provider startup path, including deferred connection.
++local waiting = true
++MPAPI.networking.steam = {
++	provider = function() return {} end,
++	begin_startup_wait = function() return waiting end,
++}
++official, ready = true, false
++check(startup() == true and ready and started == 1 and callbacks == 2, 'Official provider startup waits for the provider to settle')
++waiting = false
++check(startup() == true and started == 2 and callbacks == 3, 'settled Steam provider starts Official login without G.STEAM')
 +print(('ok   %d mobile login checks'):format(checks))

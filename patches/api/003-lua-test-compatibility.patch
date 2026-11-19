@@ -1,0 +1,14 @@
+diff --git a/tests/card_save_validation_test.lua b/tests/card_save_validation_test.lua
+index e1cd78f4af224208ea55ea55cea3231dea2c38f7..0f4f0f14d66e9614702aea12451c3789d5906eb0 100644
+--- a/tests/card_save_validation_test.lua
++++ b/tests/card_save_validation_test.lua
+@@ -1,3 +1,9 @@
++-- The serializer uses goto, supported by LÖVE's LuaJIT but not Lua 5.1.
++if not (loadstring or load)("::label::") then
++	print("SKIP card_save_validation_test: requires goto support; run with LuaJIT")
++	return
++end
++
+ --[[
+   Card-save validation test: a payload from the opponent must not be able to put a wrong-typed
+   field into a card's ability (the h_size = "abc" crash).

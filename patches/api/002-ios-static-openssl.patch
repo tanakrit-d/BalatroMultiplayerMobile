@@ -1,14 +1,11 @@
 diff --git a/networking/openssl_ffi.lua b/networking/openssl_ffi.lua
-index 435f80f77b0a7cf8273e08072b3b2dbbba3ab2fc..af11f7004e52f48acd954ad8000550b4b7589142 100644
+index a78051d63bd4fa8cb3e45791ba753b372bedb65d..febaae1b4b149a2fa45b6126924c2683012f1639 100644
 --- a/networking/openssl_ffi.lua
 +++ b/networking/openssl_ffi.lua
-@@ -201,6 +201,27 @@
+@@ -204,6 +204,27 @@ local function load_openssl()
+ 		return true
+ 	end
  
- local function load_openssl()
- 	if openssl_loaded then
-+		return true
-+	end
-+
 +	-- The iOS runtime links OpenSSL statically and exports it for every Lua
 +	-- state, including networking workers. Never dlopen the desktop dylibs.
 +	if os.getenv('BMP_IOS_OPENSSL') == '1' then
@@ -27,6 +24,9 @@ index 435f80f77b0a7cf8273e08072b3b2dbbba3ab2fc..af11f7004e52f48acd954ad8000550b4
 +		end
 +		openssl_loaded = true
 +		ssl_log('Using OpenSSL linked into the iOS runtime')
- 		return true
- 	end
- 
++		return true
++	end
++
+ 	local ok, err = pcall(function()
+ 		-- Build list of names to try, per-platform. ffi.os is one of
+ 		-- 'Windows', 'OSX', 'Linux', 'BSD', etc. The library *names* differ by
