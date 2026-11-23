@@ -1,0 +1,16 @@
+diff --git a/tests/unit/ready_check_referee_test.lua b/tests/unit/ready_check_referee_test.lua
+index 16ef2f1362116139e477c452bdf4b25a0976cf8e..ac2ad70f361e499875ae1424672834a8849ada3d 100644
+--- a/tests/unit/ready_check_referee_test.lua
++++ b/tests/unit/ready_check_referee_test.lua
+@@ -374,6 +374,11 @@
+ end)
+ 
+ test("a Ready lost before host delivery retries through the real button/router", function()
++	-- The real action router uses goto, which plain Lua 5.1 cannot parse.
++	if not (loadstring or load)("::label::") then
++		print("SKIP real button/router retry: requires goto support; run with LuaJIT")
++		return
++	end
+ 	setup("pair")
+ 	G.STATE = G.STATES.BLIND_SELECT
+ 	-- Exercise the real button, local ready action and outgoing router. Only the
