@@ -6,6 +6,7 @@
 | API 002 | Load runtime-linked OpenSSL through `ffi.C` when `BMP_IOS_OPENSSL=1`; stop on initialization/symbol errors | Builder `088e9e56416d7690b226047fc617fab7616000b0` |
 | API 003 | Skip the serializer validation test on plain Lua 5.1; run its `goto` code under LuaJIT | Mobile v1.0.6 adaptation |
 | PvP 001 | Use `loadstring or load` | PvP mobile `88976150d069db4acfaf5d3d278e763c76338c59` |
+| PvP 002 | Run the ready-check button/router case under LuaJIT, which supports the router's `goto` syntax | Mobile v1.0.7 adaptation |
 
 Native OpenSSL compilation, CA packaging, symbol export, environment setup, desktop-library removal, download retries and IPA packaging remain builder responsibilities. The API loader patch replaces only the builder's Lua source injection.
 

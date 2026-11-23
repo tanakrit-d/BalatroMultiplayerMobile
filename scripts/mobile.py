@@ -129,8 +129,9 @@ def apply_patch(tree, patch):
             ).hexdigest()
             if before != actual:
                 raise ValueError(f"Patch preimage mismatch: {relative}")
-    run("git", "apply", "--check", "--whitespace=nowarn", str(patch), cwd=tree)
-    run("git", "apply", "--whitespace=nowarn", str(patch), cwd=tree)
+    apply = ("git", "-c", "core.autocrlf=false", "apply", "--whitespace=nowarn")
+    run(*apply, "--check", str(patch), cwd=tree)
+    run(*apply, str(patch), cwd=tree)
 
 
 def series(key):

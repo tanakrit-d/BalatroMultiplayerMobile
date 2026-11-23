@@ -61,7 +61,8 @@ class PipelineTests(unittest.TestCase):
 
             patchfile = root / "change.patch"
             patchfile.write_text(
-                f"diff --git a/file b/file\nindex {blob(old)}..{blob(new)} 100644\n--- a/file\n+++ b/file\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+                f"diff --git a/file b/file\nindex {blob(old)}..{blob(new)} 100644\n--- a/file\n+++ b/file\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n",
+                newline="\n",
             )
             (root / "file").write_bytes(b"prefix\n" + old)
             with self.assertRaisesRegex(ValueError, "preimage"):
