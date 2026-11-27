@@ -3,17 +3,17 @@
   "sources": {
     "api": {
       "repository": "Balatro-Multiplayer/BalatroMultiplayerAPI",
-      "tag": "v1.0.7",
-      "commit": "0c9ea082b154c6e182dadcfd75c2a15e9e803f32",
-      "version": "1.0.7",
-      "archive_sha256": "831c86c6d19246038675d05939e5c5705143d6258ed0cfea6d4eff0a8b1b56c5"
+      "tag": "v1.0.8",
+      "commit": "3bdf4ed035035b686ec9dfa59bfc900ad2012020",
+      "version": "1.0.8",
+      "archive_sha256": "6065ad53faba9107934ccf2ff83bcea8bf325e06d8d2bb574010a87c52323593"
     },
     "pvp": {
       "repository": "Balatro-Multiplayer/BalatroMultiplayerPvP",
-      "tag": "v1.0.7",
-      "commit": "afaed21b6e40f669810aa7e20ebce49b08d8c58b",
-      "version": "1.0.7",
-      "archive_sha256": "1bf5402d5ed141639b01dbb360ab9ff1be2ac1c0ed7933af2214f637dcdcd109"
+      "tag": "v1.0.8",
+      "commit": "9e54f17178ceea7ec7bf5d96e11d70a8a4f0a8f2",
+      "version": "1.0.8",
+      "archive_sha256": "4b0bd0d28839311c94db748c99087a56508b4d4638e18b44b0ad7b6958f2f287"
     }
   }
 }
